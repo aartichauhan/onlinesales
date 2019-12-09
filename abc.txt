@@ -1,0 +1,1646 @@
+import { Component, OnInit } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { FormBuilder, FormControl, FormGroup, Validators } from '@angular/forms';
+import { ActivatedRoute, Router, RouterState, RouterStateSnapshot } from '@angular/router';
+import { AdobeAnalyticsService } from '@core/services/generic/adobe.analytics.service';
+import { GeneralService } from '@core/services/generic/general.service';
+import { GoogleAnalyticsService } from '@core/services/generic/google.analytics.service';
+import { PreprocessorService } from '@core/services/generic/preprocessor.service';
+import { SecuredService } from '@core/services/generic/secured.service';
+import { UserService } from '@core/services/generic/user.service';
+import { StorageService } from '@core/services/storage.service';
+import { TranslateService } from '@ngx-translate/core';
+import { countryCodes } from '@shared/components/content-select/schemas/country-code';
+import { postalFormats } from '@shared/components/map-popup/constants/map.popup.constant';
+import {
+  AnalyticsEventActions,
+  AnalyticsEventType,
+  analyticsInfo,
+  AnalyticsMinProductAttributes,
+  AnalyticsMinProductInfo,
+  AnalyticsSolutionSpecificFields,
+} from '@shared/constants/analytics.constants';
+import {
+  countriesBypassStockCheckPopup,
+  countryInformation,
+  longDescriptionContries,
+} from '@shared/constants/app.constants';
+import { AllSeriesData } from '@shared/schemas/all-series-data';
+import { GlobalValidatorFunctions } from '@shared/validations/functions';
+import { COUNTRY, environment } from 'environments/in/environment.dev';
+
+import { emiText, fuelCodes } from '../../../constants/models.constant';
+import { ModelImagesData } from '../../../schemas/model-images-data';
+import { ModelsData } from '../../../schemas/models-data';
+
+const DEFAULT_BANNER_INDIA = 'assets/images/banner/common-for-india.jpg';
+const DEFAULT_BANNER = 'assets/images/banner/common.jpg';
+declare var fbq: Function;// <-- Here we declare Facebook pixel
+
+@Component({
+  selector: 'app-ucp-models',
+  templateUrl: './ucp-models.component.html',
+  styleUrls: ['./ucp-models.component.scss']
+})
+export class UcpModelsComponent implements OnInit {
+
+  rangeCode: string;
+  allSeries = [];
+  rangeList = [];
+  currentRange: any = {};
+  rangeModelOptionsList = [];
+  bannerImg: string = '';
+  public countryCode = COUNTRY.COUNTRY_CODE;
+  currencySymbol = countryInformation[this.countryCode].currencyCode;
+  langCode = countryInformation[this.countryCode].langCode;
+  pincodeDigit = countryInformation[this.countryCode].registration.pincodeDigit;
+  fuelDropdown: any[];
+  allModelDropdown: any[];
+  fuelDropdownOptions: any[];
+  allRangesDropdownOptions: any[] = [];
+  varientsDropdownOptions: any[] = [];
+  varientsDropdownOptionsFiltered: any[] = [];
+  selectedRangeOption: any = {};
+  selectedFuelType: any = {};
+  selectedVariant: any = {};
+  optionLimitHigher = false;
+  hideFilterTitle = { fuel: false, variants: false };
+  stockAvailablePopup = false;
+  stockUnavailablePopup = false;
+  // showOfferTag = false;
+  offerTagText = '';
+  disclaimerText = '';
+
+  carsLoading: boolean;
+
+  selectedOptionCode: String;
+  isStockAvailable = false;
+  isOptionSelected = false;
+  isPincodeFormSubmittedSuccessfully = false;
+  cities = [];
+  states = [];
+  defaultCity = '';
+  checkAvailabilityForm: FormGroup;
+  selectedModelIndex = '';
+  availableModelDetails: any = {
+    interior: {},
+    exterior: {},
+    data: {},
+    pincode: '',
+    selectedCity: '',
+    selectedState: '',
+    modelIndex: '',
+    availabilityMessage: ''
+  };
+
+  modelInfo: any = {};
+  carInfo: any = {};
+  showZoomImage = false;
+  zoomImages: any = {};
+
+  dialogmsgstatus = false;
+  user: any;
+  stockCheckLoading = false;
+
+  areCarsLoaded = true;
+
+  availabilityStatus: boolean = false;
+  interiorLoadingModel: string = null;
+  selectedModels: string[] = [];
+  modelExteriorLoading: boolean;
+  public postalFormats = postalFormats[this.countryCode];
+  pincodeError: boolean;
+  bannerImgLoading: boolean = false;
+  private emiLink = countryInformation[this.countryCode].emiLink;
+  bannerDescription: any = {};
+
+  virtualPageLoad: boolean = false;
+  recommendModel: boolean;
+  showRecommendedModelsPopUp: boolean;
+  recommendedModelIncludedOptions = new Map();
+  recommendedModels: any;
+  displayDealerDialog: boolean;
+  selectedRecommendedModelCode: any;
+  selectedRecommendedModelInteriorCode: any;
+  recommendedModelLoader: boolean
+  selectedRecommendedModelName: any;
+  selectedDealerCode: any;
+  dealerWillContactPopup: boolean;
+  selectedModelRangeForDealer: any[];
+  
+  snapshot: RouterStateSnapshot;
+  contactDealerClick: any;
+  selectedSeriesForDealerContact: any;
+  selectedModelRangeForDealerContact: any;
+  selectedVariantForDealerContact: any;
+  selectedModelCodeForDealerContact: any;
+  selectedExteriorForDealerContact: any;
+  selectedInteriorForDealerContact: any;
+  contactDealerBtn: boolean;
+  availableRcmndedOptions: boolean =false;
+  checkAvailabilityPincode: any;
+  checkAvailabilityState: any;
+  checkAvailabilityCity: any;
+  showTryAgainMsg: boolean =false;
+  loading: boolean;
+  selectedBrandForDealerContact: any;
+
+  constructor(
+    public translate: TranslateService,
+    private route: ActivatedRoute,
+    private router: Router,
+    private _analyticsService: GoogleAnalyticsService,
+    private _adobeAnalyticsService: AdobeAnalyticsService,
+    private _generalService: GeneralService,
+    private _securedService: SecuredService,
+    private _preprocessorService: PreprocessorService,
+    private _storageService: StorageService,
+    private _userService: UserService,
+    private formBuilder: FormBuilder,
+    private http: HttpClient
+  ) {
+    const state: RouterState = router.routerState;
+      this.snapshot = state.snapshot;
+  }
+
+  loadData() {
+    this.hideFilterTitle = { fuel: false, variants: false };
+    this.fuelDropdownOptions = [];
+    this.varientsDropdownOptions = [];
+    this.selectedVariant = null;
+    this.varientsDropdownOptionsFiltered = [];
+    this.selectedFuelType = this.fuelDropdownOptions[0];
+    this.currentRange = {};
+
+    this.carsLoading = true;
+    this._generalService
+      .post({}, 'ucp/' + this.countryCode + '/v1/ucp-allseries')
+      .subscribe(
+        (data: AllSeriesData) => {
+          console.log('allSeries:', this.allSeries)
+          if (!(countriesBypassStockCheckPopup.indexOf(this.countryCode) > -1)) {
+            this.carsLoading = false;
+          }
+
+          this.areCarsLoaded = true;
+
+          this.allSeries = this._preprocessorService.processAllSeries(data);
+          this._preprocessorService.processOfferPrice(data);
+
+          this.rangeList = [];
+          try {
+            const seriesSortOrder =
+              data.sortOrder &&
+              data.sortOrder.sortOrder &&
+              data.sortOrder.sortOrder.series;
+            const rangeSortOrder =
+              data.sortOrder &&
+              data.sortOrder.sortOrder &&
+              data.sortOrder.sortOrder.modelRanges;
+            if (seriesSortOrder) {
+              this.allSeries.sort((n1: any, n2: any) => {
+                return (
+                  seriesSortOrder[n1.name] ? (seriesSortOrder.indexOf(n1.name) -
+                  seriesSortOrder.indexOf(n2.name)) : 1
+                );
+              });
+            }
+            this.allSeries.forEach(eachSeries => {
+              if (rangeSortOrder) {
+                eachSeries.rangeList.sort((n1: any, n2: any) => {
+                  return (
+                    rangeSortOrder[eachSeries.name] ? (rangeSortOrder[eachSeries.name].indexOf(n1.name) -
+                    rangeSortOrder[eachSeries.name].indexOf(n2.name)) : 0
+                  );
+                });
+              }
+
+              eachSeries.rangeList.forEach(eachRange => {
+                this.rangeList.push({
+                  code: eachRange.name,
+                  name:
+                    eachRange.value.additionalData &&
+                    eachRange.value.additionalData.description && this.getDescription(eachRange.value.additionalData.description)
+                });
+                if (eachRange.name === this.rangeCode) {
+                  this.currentRange = eachRange.value;
+                }
+              });
+            });
+
+            if (this.currentRange.models) {
+              this.currentRange.modelList = Object.keys(
+                this.currentRange.models
+              ).map(key => {
+                this.currentRange.models[key].available = 'NOT_AVAILABLE';
+                return {
+                  name: key,
+                  value: this.currentRange.models[key],
+                  currentImage: (this.currentRange.models[key].additionalData
+                    .cosyImageUrls) ? this.currentRange.models[key].additionalData
+                    .cosyImageUrls.POSITIONMODEL_DEFAULT
+                    .DT_POSITIONMODEL_DEFAULT.imageUrl : ''
+                };
+              });
+            } else {
+              //this.router.navigate(['404']);
+            }
+
+            // this.processCurrentRange();
+
+          } catch (e) {
+            this.carsLoading = false;
+          }
+          console.log('rangeeee: ',this.rangeCode)
+          this.fetchModelOptions(this.rangeCode, this.currentRange);
+        },
+        err => {
+          this.carsLoading = false;
+          this.areCarsLoaded = false;
+        }
+      );
+  }
+
+  loadBanner(rangeCode) {
+    this.bannerImgLoading = true;
+    this._generalService
+      .post(
+        { countryCode: this.countryCode.toUpperCase(), environment: 'UAT' },
+        'customer-journey/' + this.countryCode + '/v1/fetch-offers'
+      )
+      .subscribe(data => {
+        this.bannerImgLoading = false;
+        const images: any = data.ranges; // this._preprocessorService.modelPageBannersFromAdminPortal(data);
+        if (images && images[rangeCode] && images[rangeCode].image) {
+          this.bannerImg = images[rangeCode].image;
+          this.bannerDescription = images[rangeCode];
+        } else {
+          if(this.countryCode === countryCodes.india){
+            this.bannerImg = DEFAULT_BANNER_INDIA;
+          }else{
+            this.bannerImg = DEFAULT_BANNER;
+          }
+          this.bannerDescription = {};
+        }
+
+        for (const i in data.ranges) {
+          if (rangeCode === i) {
+            if (data.ranges[i].textOnOfferTag) {
+              // this.showOfferTag = true;
+              this.offerTagText = data.ranges[i].textOnOfferTag;
+            } else {
+              //  this.showOfferTag = false;
+            }
+            if (data.ranges[i].offerDisclamer) {
+              this.disclaimerText = data.ranges[i].offerDisclamer;
+            }
+          }
+        }
+      },
+        err => {
+          this.bannerImgLoading = false;
+          if(this.countryCode === countryCodes.india){
+            this.bannerImg = DEFAULT_BANNER_INDIA;
+          }else{
+            this.bannerImg = DEFAULT_BANNER;
+          }
+          this.bannerDescription = {};
+        }
+      );
+  }
+
+  ngOnInit() {
+    window.scroll(0, 0);
+    if (this._storageService.isLoggedIn()) {
+      this._securedService
+        .get('user-reg/' + this.countryCode + '/v1/user-fetch-details')
+        .subscribe(
+          (data: any) => {
+            if (data && data.userDetails) {
+              this.user = data.userDetails;
+            }
+          },
+          err => { }
+        );
+    }
+
+    this.route.params.subscribe(response => {
+      this.rangeCode = response.rangeCode;
+
+      this.loadBanner(this.rangeCode);
+      this.loadData();
+    });
+    this.checkAvailabilityForm = this.formBuilder.group({
+      pincode: ['', [Validators.required, GlobalValidatorFunctions.validatePincodeDigits]],
+      city: [this.defaultCity, [Validators.required]],
+      state: ['', [Validators.required]]
+    });
+    this.checkAvailabilityForm.get('city').disable();
+    this.varientsDropdownOptionsFiltered = this.varientsDropdownOptions;
+    this.contactDealerClick= this.route.snapshot.queryParams['contactDealerClick'];
+    if(this.contactDealerClick){
+      this.autoOpenContactDealerPopUp();
+    }
+  }
+
+  processCurrentRange() {
+
+
+    this.varientsDropdownOptions = [];
+
+    this.varientsDropdownOptions.push({
+      code: '',
+      name: this.translate.instant('main.global.all'),
+      fuelCode: ''
+    });
+    const setList = new Set();
+    this.currentRange.modelList.forEach(model => {
+      const fcode = model.value.fuelType;
+      setList.add(fcode);
+      this.varientsDropdownOptions.push({
+        code: model.name,
+        name: (longDescriptionContries.indexOf(this.countryCode) > -1 ) ? model.value.additionalData.description
+        [this.langCode].longDescription : model.value.additionalData.description[this.langCode].mediumDescription,
+        fuelCode: fcode
+      });
+    });
+
+
+    this.allRangesDropdownOptions = this.rangeList;
+    this.selectedRangeOption = this.allRangesDropdownOptions.filter(
+      op => op.code === this.rangeCode
+    )[0];
+
+    // Adobe Analytics Event
+    this.pageLoadAnalyticsEvent();
+    
+    this.fuelDropdown = fuelCodes;
+
+    this.fuelDropdownOptions = [];
+    this.fuelDropdownOptions.push({ code: '', name: this.translate.instant('main.global.all') });
+    setList.forEach(element => {
+      this.fuelDropdownOptions.push({
+        code: this.fuelDropdown.filter(op => op.code === element)[0]
+          .code,
+        name: this.fuelDropdown.filter(op => op.code === element)[0]
+          .name
+      });
+    });
+    this.fuelDropdownOptions = this.fuelDropdownOptions.sort(
+      (n1, n2) => {
+        if (n1.name > n2.name) {
+          return 1;
+        }
+        if (n1.name < n2.name) {
+          return -1;
+        }
+        return 0;
+      }
+    );
+    this.allModelDropdown = this.varientsDropdownOptions;
+    this.fuelDropdown = this.fuelDropdownOptions;
+    if (this.currentRange.modelList) {
+      this.currentRange.modelList.sort((a, b) => {
+        if (
+          !a.value ||
+          !a.value.transmissionVariants[0] ||
+          !a.value.transmissionVariants[0].additionalData ||
+          !a.value.transmissionVariants[0].additionalData.price ||
+          !b.value ||
+          !a.value.transmissionVariants[0] ||
+          !b.value.transmissionVariants[0].additionalData ||
+          !b.value.transmissionVariants[0].additionalData.price
+        ) {
+          return;
+        }
+
+        const aPrice =
+          a.value.transmissionVariants[0].additionalData.price.netPrice;
+        const bPrice =
+          b.value.transmissionVariants[0].additionalData.price.netPrice;
+        if (aPrice < bPrice) {
+          return -1;
+        }
+        if (aPrice > bPrice) {
+          return 1;
+        }
+        return 0;
+      });
+    }
+    this.varientsDropdownOptionsFiltered = this.varientsDropdownOptions;
+    this.selectedFuelType = 'Fuel Type'; //this.fuelDropdownOptions[0];
+    this.selectedVariant = 'Variants'; //this.varientsDropdownOptions[0];
+  }
+
+  fetchModelOptions(rangeCode, currentRange) {
+    const options = {
+      modelRange: rangeCode,
+      brand:
+        currentRange.modelList && currentRange.modelList.length > 0
+          ? currentRange.modelList[0].value.brand
+          : 'BM'
+    };
+    this.modelExteriorLoading = true;
+    this._generalService
+      .post(options, 'ucp/' + this.countryCode + '/v1/ucp-allmodels')
+      .subscribe(
+        (data: ModelsData) => {
+          console.log('allmodel:')
+          this.carsLoading = false;
+          this.modelExteriorLoading = false;
+          // Convert map to array
+          try {
+            this._preprocessorService.processRangeModelOptions(
+              data,
+              currentRange
+            );
+            this.updateImages();
+            this.processCurrentRange();
+          } catch (e) {
+            this.carsLoading = false;
+            this.modelExteriorLoading = false;
+          }
+        },
+        err => {
+          this.carsLoading = false;
+          this.modelExteriorLoading = false;
+        }
+      );
+  }
+
+  updateImages() {
+    this.optionLimitHigher = false;
+    this.currentRange.modelList.forEach(model => {
+      model.configState = '';
+      model.currentImageLoading = true;
+      this.updateOptionImage(model, model.extraDescriptionData.selectedOptions);
+      if (
+        model.extraDescriptionData &&
+        ((model.extraDescriptionData.exteriorNonMetalicList &&
+          model.extraDescriptionData.exteriorNonMetalicList.length > 10) ||
+          (model.extraDescriptionData.exteriorMetalicList &&
+            model.extraDescriptionData.exteriorMetalicList.length > 10) ||
+          (model.extraDescriptionData.interiorList &&
+            model.extraDescriptionData.interiorList.length > 10))
+      ) {
+        this.optionLimitHigher = true;
+      }
+    });
+  }
+
+  updateOptionImage(model, selectedOptions, isInteriorCall?: boolean) {
+    const options = {
+      agModelCode: model.value.agModelCode,
+      modelCode: model.name,
+      'included-options': [],
+      selectedOption: this.selectedOptionCode,
+      configState: model.configState,
+      // "included-options":selectedOptions?[selectedOptions.interior.name,selectedOptions.exterior.name]:[],
+      collectionName: 'MODEL',
+      brand:
+        this.currentRange.modelList && this.currentRange.modelList.length > 0
+          ? this.currentRange.modelList[0].value.brand
+          : 'BM'
+    };
+
+    // For New Constructibility check
+    const paramsForConstructibilityCheck = {
+      'included-options': [],
+      modelCode: model.name,
+      brand:
+        this.currentRange.modelList && this.currentRange.modelList.length > 0
+          ? this.currentRange.modelList[0].value.brand
+          : 'BM',
+      interiorOptions: []
+    };
+    model.extraDescriptionData.interiorList.forEach(element => {
+      paramsForConstructibilityCheck['interiorOptions'].push(element.name);
+    });
+    //
+
+    const F = !!(
+      selectedOptions &&
+      selectedOptions.interior &&
+      selectedOptions.interior.name
+    );
+    const P = !!(
+      selectedOptions &&
+      selectedOptions.exterior &&
+      selectedOptions.exterior.name
+    );
+
+    if (F) {
+      options['included-options'].push(selectedOptions.interior.name);
+    }
+
+    if (P) {
+      options['included-options'].push(selectedOptions.exterior.name);
+
+      // New Change
+      paramsForConstructibilityCheck['included-options'].push(
+        selectedOptions.exterior.name
+      );
+    }
+    
+    try {
+      if (model.value.transmissionVariants[0]) {
+        model.value.transmissionVariants[0].includedOptions.forEach(element => {
+          const alreadyExist =
+            options['included-options'].filter(
+              v =>
+                (F && element.startsWith('F')) || (P && element.startsWith('P'))
+            ).length > 0;
+
+          if (!alreadyExist) {
+            options['included-options'].push(element);
+
+            // New Change
+            paramsForConstructibilityCheck['included-options'].push(element);
+
+            if (!P) {
+              // select into exterior
+              selectedOptions.exterior =
+                selectedOptions.exterior ||
+                model.extraDescriptionData.exteriorList.filter(
+                  op => op == element
+                )[0] ||
+                {};
+            }
+            if (!F) {
+              // select interior
+              selectedOptions.interior =
+                selectedOptions.interior ||
+                model.extraDescriptionData.interiorList.filter(
+                  op => op == element
+                )[0] ||
+                {};
+            }
+          }
+        });
+        options['included-options'].sort();
+
+        // New Change
+        const exterior =
+          model.extraDescriptionData.selectedOptions.exterior.name;
+        paramsForConstructibilityCheck['included-options'].push(exterior);
+        paramsForConstructibilityCheck['included-options'].splice(0, 1);
+        paramsForConstructibilityCheck['included-options'].sort();
+      }
+    } catch (e) {
+      model.currentImageLoading = false;
+    }
+    
+    // loading... image
+    // model.currentImage = LOADER_IMAGE;
+    model.currentImageLoading = true;
+    // this.carsLoading = true;
+
+    const optionPayload = (this.countryCode === countryCodes.japan) ? {
+      ...options,
+      availableOptions : Object.keys(model.extraDescriptionData.value.allOptionDetails)
+    } : options;
+    this._generalService
+      .post(optionPayload, 'ucp/' + this.countryCode + '/v1/ucp-modelimage')
+      .subscribe(
+        (data: ModelImagesData) => {
+          this.carsLoading = false;
+          model.currentImageLoading = false;
+          // model.currentImage = data.imageDetails.DT_VEHICLE_TILT_FRONT.TILT_FRONT_001.imageUrl;
+          try {
+            /* let loaded = () => {
+            model.currentImage = data.imageDetails.image.MODEL.DT_COMPARE_MODEL_VIEW.imageUrl;
+            model.currentImageLoading = false;
+          } */
+
+            if (data.imageDetails) {
+              // Load the actual image offscreen and display it on page once its loaded
+              const offscreenImg = new Image();
+              offscreenImg.onload = () => {
+                model.currentImageLoading = false;
+                model.currentImage =
+                  data.imageDetails.image.MODEL.DT_COMPARE_MODEL_VIEW.imageUrl;
+              };
+              offscreenImg.onerror = () => {
+                model.currentImageLoading = false;
+              };
+              // model.currentImageLoading = true;
+              model.currentImage = 'assets/images/white-image.png';
+              model.currentImageLoading = true;
+              offscreenImg.src =
+                data.imageDetails.image.MODEL.DT_COMPARE_MODEL_VIEW.imageUrl;
+
+              if (data.imageDetails.price) {
+                model.value.transmissionVariants[0].additionalData.actualPrice =
+                  data.imageDetails.price.priceTreeNode.effectivePrice.netPrice;
+
+                 if (this.countryCode === countryCodes.japan) {
+                model.value.transmissionVariants[0].additionalData.price.totalTaxes =
+                  data.imageDetails.price.priceTreeNode.effectivePrice.totalTaxes;
+                model.value.transmissionVariants[0].additionalData.price.grossPrice =
+                  data.imageDetails.price.priceTreeNode.effectivePrice.grossPrice;
+                  model.extraDescriptionData.availableOptionsPrice = data.imageDetails.price.availableOptions;
+                  this._preprocessorService.processOfferPriceForModel(this.allSeries, model);
+                  }
+              }
+              // After loaded
+
+              // model.currentImage = data.imageDetails.image.MODEL.DT_COMPARE_MODEL_VIEW.imageUrl;
+              /* model.configState = data.imageDetails.constructibilityDetails.configState;
+            model.constructibility = data.imageDetails.constructibilityDetails.constructibility; */
+              // model.currentImageLoading = false;
+
+              // After loaded end
+            }
+          } catch (e) {
+            this.carsLoading = false;
+          }
+        },
+        err => {
+          this.carsLoading = false;
+        }
+      );
+
+    // New Change
+    if (!isInteriorCall) {
+      model.extraDescriptionData.constructibilityDetails = {
+        interiorList: []
+      };
+      this.interiorLoadingModel = model.name;
+      const others = {
+        pincode: this.user ? this.user['pincode'] : '',
+        state: this.user ? this.user['state']  : '',
+        city: this.user ? this.user['city']  : '',
+        modelName: model['value']['additionalData']['description'][this.langCode]['description'],
+        agModelCode: model['value']['agModelCode'],
+        seriesName: model['value']['series']
+      };
+      this.recommendedModelIncludedOptions.set(paramsForConstructibilityCheck.modelCode, { ...paramsForConstructibilityCheck, ...others });
+      this._generalService
+        .post(
+          paramsForConstructibilityCheck,
+          'ucp/' + this.countryCode + '/v1/ucp-fetchinterior'
+        )
+        .subscribe(
+          (data: any) => {
+            try {
+              if (
+                data &&
+                data.interiors &&
+                model.extraDescriptionData.selectedOptions.exterior.name &&
+                model.extraDescriptionData.interiorList &&
+                model.extraDescriptionData.interiorList.length > 0
+              ) {
+                model.extraDescriptionData.constructibilityDetails.interiorList = model.extraDescriptionData.interiorList.filter(
+                  obj => data.interiors.includes(obj.name)
+                );
+                this.availabilityStatus = true;
+                this.interiorLoadingModel = null;
+                if (this.selectedRecommendedModelCode) {
+                  model.extraDescriptionData.constructibilityDetails.interiorList.forEach(interiors => {
+                    if (interiors.name == this.selectedRecommendedModelInteriorCode) {
+                        this.selectInteriorOption(interiors, model);
+                    }
+                  });
+                }
+              }
+            } catch (e) {
+              this.availabilityStatus = false;
+              this.interiorLoadingModel = null;
+            }
+          },
+          err => {
+            this.availabilityStatus = false;
+            this.interiorLoadingModel = null;
+          }
+        );
+    }
+
+    options.collectionName = 'DT_INTERIOR_WALKAROUND,DT_VEHICLE_EXTERIOR,DT_VEHICLE_TILT_FRONT,DT_VEHICLE_TILT_REAR,VEHICLE';
+    model.driverSideViewLoading = true;
+    model.frontSideViewLoading = true;
+    model.driverDoorViewLoading = true;
+    model.dashBoardViewLoading = true;
+
+    // load driver view image
+    this._generalService
+      .post(options, 'ucp/' + this.countryCode + '/v1/ucp-modelimage')
+      .subscribe(
+        (data: any) => {
+          model.driverSideView =
+            data.imageDetails.VEHICLE.DT_DRIVERDOOR_VIEW_CLOSE.imageUrl;
+          model.driverSideViewLoading = false;
+          model.frontSideView =
+            data.imageDetails.VEHICLE.FRONTSIDE_VIEW.imageUrl;
+          model.frontSideViewLoading = false;
+          model.driverDoorView =
+            data.imageDetails.VEHICLE.DT_DRIVERDOOR_VIEW_CLOSE.imageUrl;
+          model.driverDoorViewLoading = false;
+          model.dashBoardView =
+            data.imageDetails.VEHICLE.P_DASHBOARD_VIEW.imageUrl;
+          model.dashBoardViewLoading = false;
+          model.imageDetails =
+            data.imageDetails;
+        },
+        err => { }
+      );
+  }
+
+  zoomImage(eachModel) {
+    this.modelInfo = eachModel;
+    this.carInfo = eachModel.extraDescriptionData;
+    this.showZoomImage = true;
+    this.zoomImages = {
+      frontSideView: eachModel.frontSideView,
+      driverDoorView: eachModel.driverDoorView,
+      dashBoardView: eachModel.dashBoardView
+    };
+
+    this.zoomImages.currentImage = 'frontSideView';
+  }
+
+  selectExteriorOption(option, model, flag?: string) {
+    this.availableRcmndedOptions = false;
+    if (
+      option.name !== model.extraDescriptionData.selectedOptions.exterior.name
+    ) {
+      model.extraDescriptionData.selectedOptions.exterior = option;
+      this.selectedOptionCode =
+        model.extraDescriptionData.selectedOptions.exterior.value.extraData.option;
+      const exteriorDetails = {
+        name:
+          model.extraDescriptionData.selectedOptions.exterior.value.extraData
+            .phrases.longDescription,
+        imageURL: option.value.PAINT.templates[0].P_PAINT_S.imageUrl
+      };
+      this.availableModelDetails.exterior = exteriorDetails;
+      // this.updateOptionImage(model, model.extraDescriptionData.selectedOptions);
+      // New Change
+      if (model.extraDescriptionData.selectedOptions.exterior.name != null) {
+        this.updateOptionImage(
+          model,
+          model.extraDescriptionData.selectedOptions
+        );
+        this.selectedModels.push(model.name);
+        // this.availabilityStatus =true;
+        model.extraDescriptionData.selectedOptions.interior = null;
+      }
+      // this.selectInteriorOption(option,model);
+      model.available = 'NOT_AVAILABLE';
+
+      // Adobe Analytics
+      this.fillModelAnalyticsData(model);
+    } else {
+      // Make the interior color selected incase there is no change in the exterior color
+      if(flag == 'recommendedModel') {
+        model.extraDescriptionData.interiorList.forEach(interiors => {
+          if (interiors.name == this.selectedRecommendedModelInteriorCode) {
+             this.selectInteriorOption(interiors, model);
+          }
+        });
+      }
+    }
+  }
+
+  selectInteriorOption(option, model) {
+    model.extraDescriptionData.selectedOptions.interior = option;
+    this.selectedOptionCode =
+      model.extraDescriptionData.selectedOptions.interior.value.extraData.option;
+    const interiorDetails = {
+      name:
+        model.extraDescriptionData.selectedOptions.interior.value.extraData
+          .phrases.longDescription,
+      imageURL: option.value.PAINT.templates[0].P_PAINT_S.imageUrl
+    };
+    this.availableModelDetails.interior = interiorDetails;
+    this.updateOptionImage(
+      model,
+      model.extraDescriptionData.selectedOptions,
+      true
+    );
+    model.available = 'NOT_AVAILABLE';
+    if( this.availableRcmndedOptions){
+      model.available = 'AVAILABLE';
+    }
+    this.availableRcmndedOptions = false;
+    //  Adobe Analytics
+    this.fillModelAnalyticsData(model);
+  }
+
+  checkContains(sourceString: string, stringArray: any[]) {
+    let returnValue = false;
+    stringArray.forEach(function (value) {
+      returnValue =
+        returnValue || sourceString.toLowerCase().includes(value.toLowerCase());
+    });
+    return returnValue;
+  }
+
+  confirmModelConfig(modelConfig) {
+    // Store configuration into session and proceed to login
+    // Check already login if required
+    if (modelConfig && !modelConfig.currentImageLoading && modelConfig.currentImage &&
+      !(modelConfig.currentImage.indexOf('images/white-image.png') > -1)) {
+      modelConfig.configUID = Math.floor(Math.random() * 1000000000000);
+      this._storageService.setModelConfig(
+        JSON.stringify({
+          configId: '',
+          externalConfigId: '',
+          modelCode: modelConfig.name,
+          configuration: modelConfig,
+          modelRangeName: this.currentRange && this.currentRange.additionalData && this.getDescription(this.currentRange.additionalData.description)
+        })
+      );
+      this.confirmModelAnalytics(modelConfig);
+      if (this._storageService.isLoggedIn()) {
+        this.router.navigate(['my-configs']);
+      } else {
+        this.router.navigate(['login'], {
+          queryParams: { returnUrl: 'my-configs' }
+        });
+      }
+    }
+  }
+
+  confirmModelAnalytics(modelConfig) {
+    const eventData = {
+      event_label: modelConfig.value.additionalData.description[this.langCode].description
+    };
+    this._analyticsService.sendEvent('Confirm button - Models Page', eventData);
+    // Adobe Analytics
+    /* this.fillModelAnalyticsData(modelConfig);
+    this._analyticsService.triggerAnalyticsEvent(
+      `${analyticsInfo.general.eventEffectPrefix}selection confirmed`,
+      AnalyticsEventActions.INTERNAL_CLICK,
+      'interactions',
+      AnalyticsEventType.INTERACTION
+    ); */
+    if(this.countryCode == 'th'){
+      fbq('track', 'AddToCart');
+    }
+  }
+
+  checkAvailability(modelSelected, modelIndex) {
+    this.isOptionSelected = false;
+    this.availableModelDetails.data = {};
+    this.availableModelDetails.modelIndex = modelIndex;
+    this.availableModelDetails.availabilityMessage = '';
+    const selectedOptions = modelSelected.extraDescriptionData.selectedOptions;
+    const exteriorDetails = {
+      name: selectedOptions.exterior.value.extraData.phrases.longDescription,
+      
+      imageURL: selectedOptions.exterior.value.PAINT.templates[0].P_PAINT_S.imageUrl
+    };
+    const interiorDetails = {
+      name: selectedOptions.interior.value.extraData.phrases.longDescription,
+      imageURL: selectedOptions.interior.value.PAINT.templates[0].P_PAINT_S.imageUrl
+    };
+    this.availableModelDetails.exterior =  exteriorDetails;
+    this.availableModelDetails.interior =  interiorDetails;
+    this.checkAvailabilityForm.controls['city'].setValue('');
+
+    if (
+      modelSelected.extraDescriptionData &&
+      modelSelected.extraDescriptionData.selectedOptions.exterior.value &&
+      modelSelected.extraDescriptionData.selectedOptions.interior.value
+    ) {
+      this.isOptionSelected = true;
+      this.isPincodeFormSubmittedSuccessfully = false;
+      this.availableModelDetails.data = modelSelected;
+
+      if (
+        this._storageService.isLoggedIn() ||
+        this._storageService.getObject('CUSTOMER_STATE') ||
+        (countriesBypassStockCheckPopup.indexOf(this.countryCode) > -1) // Bypass check availability for Thailand, Japan : Don't ask pincode and city
+      ) {
+        this.checkConstructibilityAndStock(modelSelected);
+      } else {
+        this.dialogmsgstatus = true;
+      }
+    } else {
+      this.isOptionSelected = false;
+      this.dialogmsgstatus = true;
+    }
+
+    this.fillModelAnalyticsData(modelSelected);
+    this._adobeAnalyticsService.triggerAnalyticsEvent(
+      `${analyticsInfo.general.eventEffectPrefix}availability checked`,
+      AnalyticsEventActions.INTERNAL_CLICK,
+      'interactions',
+      AnalyticsEventType.INTERACTION,
+      this.getAnalyticsSolutionSpecificFields(modelSelected)
+    );
+
+    this.checkAvailabilityStartAdobeAnalytics(modelSelected);
+  }
+
+  private getAnalyticsSolutionSpecificFields(selectedModel): AnalyticsSolutionSpecificFields {
+    const analyticsSolutionSpecificFields: AnalyticsSolutionSpecificFields = {
+      slCarBudgetMin: analyticsInfo.general.fallbackValue,
+      slCarBudgetMax: analyticsInfo.general.fallbackValue,
+      slFuelType: selectedModel.value.fuelType === 'O' ?
+        'petrol' : selectedModel.value.fuelType === 'D' ? 'diesel' : selectedModel.value.fuelType.toLowerCase(),
+      slExteriorColor: this.getColor(selectedModel, 'exterior') || 'na',
+      slInteriorColor: this.getColor(selectedModel, 'interior') || 'na'
+    };
+
+
+    return analyticsSolutionSpecificFields;
+  }
+
+  checkConstructibilityAndStock(modelSelected, form?: FormGroup) {
+    if (form) {
+      if (form.get('city').valid) {
+        this.checkAvailabilityStockAndConstructibility(modelSelected);
+      } else {
+        this.validateAllFormFields(form);
+      }
+    } else {
+      this.checkAvailabilityStockAndConstructibility(modelSelected);
+    }
+    // }
+  }
+
+  checkAvailabilityLocationAnalytics(selectedModel) {
+    //  Adobe Analytics
+    this.fillModelAnalyticsData(selectedModel);
+    this._adobeAnalyticsService.triggerAnalyticsEvent(
+      `${analyticsInfo.general.eventEffectPrefix}selection confirmed`,
+      AnalyticsEventActions.INTERNAL_CLICK,
+      'interactions',
+      AnalyticsEventType.INTERACTION,
+      this.getAnalyticsSolutionSpecificFields(selectedModel)
+    );
+  }
+
+  private checkAvailabilityStockAndConstructibility(modelSelected: any) {
+    this.checkAvailabilityAnalytics(modelSelected);
+    // if (modelSelected.constructibility) {
+    modelSelected.available = 'CHECKING_AVAILABLE';
+    this.stockCheckLoading = true;
+    this.dialogmsgstatus = false;
+    /**
+     * Commented For prompting pincode if not logged in
+     *
+      if (this.checkAvailabilityForm.value.pincode) {
+        this._storageService.addObject('CUSTOMER_STATE',
+          {
+            pincode: this.checkAvailabilityForm.value.pincode,
+            state: this.checkAvailabilityForm.value.state,
+            city: this.checkAvailabilityForm.value.city
+          });
+      }
+    */
+
+    // Bypass check availability for Thailand, Japan : Show available always
+    if (countriesBypassStockCheckPopup.indexOf(this.countryCode) > -1) {
+      this.bypassCheckAvailability(modelSelected);
+    } else {
+      this.checkAvailablityFromAPI(modelSelected);
+    }
+
+  }
+
+  bypassCheckAvailability(modelSelected) {
+    if (this.countryCode !== countryCodes.japan) {
+      this.stockCheckLoading = false;
+      this.dialogmsgstatus = true;
+      this.availableModelDetails.availabilityMessage =
+        // 'Stock is available for the selected configuration';  //  old message
+        'Stock Available';
+      modelSelected.available = 'AVAILABLE';
+      this.isPincodeFormSubmittedSuccessfully = true;
+      } else {
+        this.confirmModelConfig(modelSelected);
+        this.stockCheckLoading = false;
+        this.dialogmsgstatus = false;
+        this.availableModelDetails.availabilityMessage =
+          // 'Stock is available for the selected configuration'; //old message
+          'Stock Available';
+        modelSelected.available = 'AVAILABLE';
+        this.isPincodeFormSubmittedSuccessfully = false;
+      }
+  }
+
+  checkAvailablityFromAPI(modelSelected: any) {
+    this.loading =true;
+    const customerStateDetails: any = this._storageService.getObject(
+      'CUSTOMER_STATE'
+    );
+      this.checkAvailabilityPincode =this.checkAvailabilityForm.value.pincode;
+      this.checkAvailabilityState =this.checkAvailabilityForm.value.state;
+      this.checkAvailabilityCity =this.checkAvailabilityForm.value.city;
+      
+      const stockCheckInputData = {
+        pincode: this.user
+          ? this.user.pincode
+          : this.checkAvailabilityForm.value.pincode ||
+          customerStateDetails.pincode,
+        state: this.user
+          ? this.user.state
+          : this.checkAvailabilityForm.value.state || customerStateDetails.state,
+        city: this.user
+          ? this.user.city
+          : this.checkAvailabilityForm.value.city || customerStateDetails.city,
+        modelCode: modelSelected.name,
+        colorCode: [
+          modelSelected.extraDescriptionData.selectedOptions.exterior.value
+            .extraData.option
+        ],
+        upholsteryCode: [
+          modelSelected.extraDescriptionData.selectedOptions.interior.value
+            .extraData.option
+        ]
+      };
+  this._generalService
+        .post(stockCheckInputData, 'stock/' + this.countryCode + '/v1/stock-check-general-bycity')
+        .subscribe(
+        (data: any) => {
+          this.stockCheckLoading = false;
+          this.loading =false;
+          this.dialogmsgstatus = true;
+          if (data.count > 0) {
+            this.availableModelDetails.availabilityMessage =
+              // 'Stock is available for the selected configuration'; //old message
+              'Stock Available';
+            modelSelected.available = 'AVAILABLE';
+            this.recommendModel = false;
+            this.contactDealerBtn = false;
+          } else if(data.count == 0 && data.canRecommendOtherOptions == true ) {
+            this.availableModelDetails.availabilityMessage =
+              // 'Stock is unavailable for the selected configuration';   //old message
+              'Stock Not Available';
+            modelSelected.available = 'NOT_AVAILABLE';
+           this.recommendModel = true;
+          } else {
+            this.availableModelDetails.availabilityMessage =
+              // 'Stock is unavailable for the selected configuration';  //old message
+              'Stock Not Available';
+            modelSelected.available = 'NOT_AVAILABLE';
+            this.recommendModel = false;
+            this.contactDealerBtn = true;
+          }
+
+          /* if (!this._storageService.isLoggedIn()) {*/
+          this.isPincodeFormSubmittedSuccessfully = true;
+          /* } */
+          if (modelSelected.available === 'AVAILABLE') {
+            this.checkAvailabilityResponseAnalytics(modelSelected);
+          } else {
+            this.checkAvailabilityResponseAnalytics(modelSelected);
+          }
+        },
+        err => {
+          this.stockCheckLoading = false;
+          /* modelSelected.available = 'NOT_AVAILABLE';
+             this.availableModelDetails.availabilityMessage =
+             'Stock is NOT Available for the selected configuration'; */
+             this.dialogmsgstatus =false;
+             this.showTryAgainMsg = true;
+             this.loading =false;
+          this.checkAvailabilityResponseErrorAnalytics(modelSelected, err);
+        }
+      );
+  }
+
+  recmmndedModels(modelCode) {
+    this.dialogmsgstatus =false;
+    this.loading =true;
+    this.recommendedModelLoader = true;
+    this.selectedRecommendedModelCode = null;
+    this.selectedRecommendedModelInteriorCode = null;
+    const pincodeDetails={ 
+      pincode: this.user ? this.user.pincode : this.checkAvailabilityPincode,
+      state: this.user ? this.user.state : this.checkAvailabilityState,
+      city: this.user ? this.user.city : this.checkAvailabilityCity
+    }
+    const inputRccmndData = {...this.recommendedModelIncludedOptions.get(modelCode),...pincodeDetails};
+    this._generalService
+      .post(inputRccmndData, 'ucp/' + this.countryCode + '/v1/recommended-models')
+      .subscribe(
+        (data: any) => {
+          this.loading =false;
+          this.dialogmsgstatus =true;
+          this.isPincodeFormSubmittedSuccessfully =true;
+          this.recommendedModels = data.recommendedModels;
+          this.selectedRecommendedModelCode = modelCode;
+          this.selectedRecommendedModelName = data.modelName;
+          this.showRecommendedModelsPopUp = true;
+          this.recommendedModelLoader = false;
+        },
+        err => {
+          this.loading =false;
+          this.recommendedModelLoader = false;
+          this.dialogmsgstatus =false;
+          this.showTryAgainMsg = true;
+        }
+      );
+      /* to send 'View available configuration' event action to Google analytics*/
+      const eventData = {
+        event_label: inputRccmndData.modelName 
+    };
+    this._analyticsService.sendEvent('View available configuration - Stock unavailable - Models Page', eventData);
+  }
+
+  explore(model) {
+    this.selectedRecommendedModelInteriorCode = model.interiorCode;
+    const exteriorCode = model.exteriorCode;
+    const modelCode = this.selectedRecommendedModelCode;
+    this.currentRange.modelList.forEach(models => {
+      if (models.name == modelCode) {
+        models.extraDescriptionData.exteriorNonMetalicList.forEach(exteriors => {
+          if (exteriors.name == exteriorCode) {
+             this.selectExteriorOption(exteriors, models, 'recommendedModel');
+          }
+        });
+        models.extraDescriptionData.exteriorMetalicList.forEach(exteriors => {
+          if (exteriors.name == exteriorCode) {
+             this.selectExteriorOption(exteriors, models, 'recommendedModel');
+          }
+        });
+      }
+    });
+    this.availableRcmndedOptions= true;
+    this.dialogmsgstatus = false;
+    this.isPincodeFormSubmittedSuccessfully = false;
+    this.showRecommendedModelsPopUp = false;
+    /* to send 'Explore' event action to Google analytics*/
+    const eventData = {
+      event_label: this.selectedRecommendedModelName 
+    };
+    this._analyticsService.sendEvent('Explore - Stock unavailable - Models Page', eventData);
+  }
+
+  checkAvailabilityResponseAnalytics(selectedModel) {
+    // Adobe Analytics
+    this.fillModelAnalyticsData(selectedModel);
+    this._adobeAnalyticsService.setupPageDataLayer('product details', 'stock availability check > success',
+      'smos new car stock locator', analyticsInfo.general.fallbackValue, analyticsInfo.general.fallbackValue, true);
+    if (this._adobeAnalyticsService.verifyRoute('/ranges/') || this._adobeAnalyticsService.verifyRoute('/allmodels/')) {
+      this._adobeAnalyticsService.triggerEvent('osm_pageload');
+    }
+  }
+
+  checkAvailabilityResponseErrorAnalytics(selectedModel, error) {
+    this._adobeAnalyticsService.triggerCommonErrorAnalytics(error, 'availability checked');
+  }
+
+  fetchCityStateFromPincode() {
+    this.cities.length = 0;
+    this.states.length = 0;
+
+    this.checkAvailabilityForm.value.state = null;
+    this.checkAvailabilityForm.controls['city'].setValue('');
+    this.checkAvailabilityForm.controls['state'].setValue('');
+
+    if (this.validatePincodeDigits()) {
+      this.pincodeError = false;
+      this.checkAvailabilityForm.get('city').enable();
+      this.defaultCity = '';
+      this._generalService
+        .get(
+          'user-reg/' + this.countryCode + '/v1/city-state-from-pincode/' + this.checkAvailabilityForm.value.pincode
+        )
+        .subscribe(
+          (data: any) => {
+            if (data && data.pincodeResponseList && data.pincodeResponseList[0]) {
+              const state = data.pincodeResponseList[0].state;
+              data.pincodeResponseList.forEach(cityDetails => {
+                this.cities.push(
+                  new Option(cityDetails.city, cityDetails.city)
+                );
+              });
+
+              this.checkAvailabilityForm.value.state = state;
+              this.checkAvailabilityForm.controls['state'].setValue(state);
+            }
+          },
+          err => { }
+        );
+    } else {
+      this.checkAvailabilityForm.get('city').disable();
+      // this.pincodeError = true;
+    }
+  }
+
+  validatePincodeDigits() {
+    if (this.checkAvailabilityForm) {
+      const pincode = this.checkAvailabilityForm.get('pincode').value;
+      const regex = new RegExp('[0-9]{' + this.pincodeDigit + '}');
+      return regex.test(pincode);
+    }
+  }
+
+  closeCheckAvailabilityPopup() {
+    this.checkAvailabilityForm.reset();
+    this.defaultCity = '';
+    this.checkAvailabilityForm.controls['city'].setValue(this.defaultCity);
+    this.checkAvailabilityForm.get('city').disable();
+    this.checkAvailabilityForm.controls['state'].setValue('');
+    this.cities.length = 0;
+    this.states.length = 0;
+    const selectedModel = this.currentRange.modelList[
+      this.availableModelDetails.modelIndex
+    ];
+    if (selectedModel.available == 'CHECKING_AVAILABLE') {
+      selectedModel.available = 'NOT_AVAILABLE';
+    }
+  }
+
+  checkAvailabilityAnalytics(eachModel) {
+    if (this.countryCode === countryCodes.japan){
+      /* Added Confirm Button GA event for Japan */
+      const eventData = {
+        event_label: eachModel.value.additionalData.description[this.langCode].longDescription
+      };
+      this._analyticsService.sendEvent(
+        'Confirm button - Models Page',
+        eventData
+      );
+    } else{
+      const eventData = {
+        event_label: eachModel.value.additionalData.description[this.langCode].description
+      };
+      this._analyticsService.sendEvent(
+        'Check Availability button - Models Page',
+        eventData
+      );
+    }
+  }
+
+  private checkAvailabilityStartAdobeAnalytics(model) {
+    this.fillModelAnalyticsData(model);
+    this._adobeAnalyticsService.setupPageDataLayer('product details', 'dealer search', 'smos new car stock locator',
+      analyticsInfo.general.fallbackValue, analyticsInfo.general.fallbackValue, true);
+    this._adobeAnalyticsService.triggerEvent('osm_pageload');
+
+  }
+
+  calculateEMI(selectedModel: any) {
+    this.emiAnalytics(selectedModel);
+
+    let emiOutboundLink = this.emiLink;
+
+    if (selectedModel && selectedModel.value) {
+
+      if (this.countryCode === 'in') {
+        const { series, modelCode, fuelType } = selectedModel.value;
+
+        // Fuel type to meaningful string while passing
+        const sendingFuelType = fuelType === 'O' ? 'Petrol' : fuelType === 'D' ? 'Diesel' : fuelType;
+
+        emiOutboundLink = `${this.emiLink}series/${series}/model/${modelCode}/fuel-type/${sendingFuelType}`;
+        window.open(emiOutboundLink, '_blank');
+        /**
+         * To trigger feedback popup for IN on EMI Calculator click
+        */
+        this._storageService.addString('feedbackPopup', true);
+      } else if (this.countryCode === 'th') {
+        const { modelCode } = selectedModel.value;
+
+        const sendingBrand = 'bmw'; // brand === 'BM' ? 'bmw' : brand;
+
+        emiOutboundLink = `${this.emiLink}${sendingBrand}/model/${modelCode}`;
+        window.open(emiOutboundLink, '_blank');
+        fbq('track', 'AddToWishlist');
+      } else {
+        window.open(this.emiLink, '_blank');
+      }
+    } else {
+      window.open(this.emiLink, '_blank');
+    }
+
+    //  Adobe Analytics
+    this.fillModelAnalyticsData(selectedModel);
+    this._adobeAnalyticsService.triggerAnalyticsEvent(
+      `${analyticsInfo.general.eventEffectPrefix}calculate emi clicked > ${emiOutboundLink}`,
+      AnalyticsEventActions.EXTERNAL_CLICK,
+      'interactions',
+      AnalyticsEventType.INTERACTION,
+      this.getAnalyticsSolutionSpecificFields(selectedModel)
+    );
+
+
+  }
+
+  emiAnalytics(modelConfig) {
+    const eventData = {
+      event_label:
+        modelConfig.value.additionalData.description[this.langCode].mediumDescription
+    };
+    this._analyticsService.sendEvent(
+      emiText[this.countryCode],
+      eventData
+    );
+  }
+  containsModel(model: string) {
+    return this.selectedModels.indexOf(model) > -1;
+  }
+
+  closePopup() {
+    this.dialogmsgstatus = false;
+    this.recommendedModelLoader =false;
+    this.isPincodeFormSubmittedSuccessfully = false;
+    this.showRecommendedModelsPopUp = false;
+    this.pincodeError = false;
+    this.cities = [];
+    this.checkAvailabilityForm.get('city').disable();
+    this.checkAvailabilityForm.reset();
+  }
+
+  selectedRangeChanged(option) {
+    const eventData = {
+      event_label: option.name
+    };
+    this._analyticsService.sendEvent('Model Range Selection - Models Page', eventData);
+    this.virtualPageLoad = true;
+    this.router.navigate(['ranges', option.code]);
+  }
+
+  variantChanged(option) {
+    const eventData = {
+      event_label: option.name
+    };
+    this._analyticsService.sendEvent('Variants filter - Models Page', eventData);
+    this.hideFilterTitle.variants = true;
+
+    //  Adobe Analytics - Commented as not tracked anymore
+    /* const selectedModel = (this.currentRange.modelList && this.currentRange.modelList.length > 0) ?
+      this.currentRange.modelList.filter(model => model.name === option.code)[0] : {};
+
+    this.fillModelAnalyticsData(selectedModel); */
+
+
+  }
+
+  private getColor(selectedModel, type) {
+    return (selectedModel.extraDescriptionData &&
+      selectedModel.extraDescriptionData.selectedOptions &&
+      selectedModel.extraDescriptionData.selectedOptions[type] &&
+      selectedModel.extraDescriptionData.selectedOptions[type].value &&
+      selectedModel.extraDescriptionData.selectedOptions[type].value.extraData &&
+      selectedModel.extraDescriptionData.selectedOptions[type].value.extraData.phrases) ?
+      selectedModel.extraDescriptionData.selectedOptions[type].value.extraData.phrases.longDescription : '';
+  }
+
+  private getName(selectedModel) {
+    return (selectedModel.value.additionalData &&
+      selectedModel.value.additionalData.description &&
+      selectedModel.value.additionalData.description.en) ?
+      selectedModel.value.additionalData.description.en.mediumDescription : '';
+  }
+
+  private getActualPrice(selectedModel) {
+    return (selectedModel.value.transmissionVariants &&
+      selectedModel.value.transmissionVariants[0] &&
+      selectedModel.value.transmissionVariants[0].additionalData) ?
+      selectedModel.value.transmissionVariants[0].additionalData.actualPrice : '';
+  }
+
+  private fillModelAnalyticsData(selectedModel) {
+    const analyticsMinProductAttributes: AnalyticsMinProductAttributes = {
+      internalCode: this.selectedRangeOption.code,
+      modelName: this.getName(selectedModel),
+      modelCode: selectedModel.name,
+      productionYear: analyticsInfo.general.fallbackValue,
+      yearOfRegistration: analyticsInfo.general.fallbackValue,
+      series: selectedModel.value.series
+    };
+    const analyticsMinProductInfo: AnalyticsMinProductInfo = {
+      productID: `${this.selectedRangeOption.code}:${selectedModel.name}`,
+      productName: this.getName(selectedModel),
+    };
+    this._adobeAnalyticsService.setupProductData(analyticsMinProductAttributes, analyticsMinProductInfo);
+  }
+
+  closeZoomPopup() {
+    this.showZoomImage = false;
+  }
+
+  fuelTypeChange(option) {
+    this.hideFilterTitle.fuel = true;
+    this.hideFilterTitle.variants = true;
+    if (this.selectedFuelType.name !== this.translate.instant('main.global.all')) {
+      const filterdArray = this.currentRange.modelList
+        .filter(model => {
+          return model.value.fuelType === this.selectedFuelType.code;
+        })
+        .map(value => value.name);
+      const filteredOptions = this.varientsDropdownOptions.filter(option2 => {
+        return (
+          filterdArray.indexOf(option2.code) !== -1 || option2.name === this.translate.instant('main.global.all')
+        );
+      });
+      this.varientsDropdownOptionsFiltered = filteredOptions;
+      this.selectedVariant = this.varientsDropdownOptionsFiltered[0];
+    } else {
+      this.varientsDropdownOptionsFiltered = this.varientsDropdownOptions;
+      this.selectedVariant = this.varientsDropdownOptions[0];
+    }
+    const eventData = {
+      event_label: this.translate.instant(option.name)
+    };
+    this._analyticsService.sendEvent('Fuel Type filter - Models Page', eventData);
+  }
+
+  validateAllFormFields(formGroup: FormGroup) {
+    Object.keys(formGroup.controls).forEach(field => {
+      const control = formGroup.get(field);
+      if (control instanceof FormControl) {
+        control.markAsTouched({ onlySelf: true });
+      } else if (control instanceof FormGroup) {
+        this.validateAllFormFields(control);
+      }
+    });
+  }
+
+  zoomLoad(model: any) {
+    if (typeof model.currentImageLoading === 'undefined') {
+      return true;
+    } else {
+      return model.currentImageLoading;
+    }
+  }
+
+  openLink(targetUrl) {
+    if (targetUrl) {
+      window.open(targetUrl, '_blank');
+    }
+  }
+
+  get isStockEmptyInPage() {
+    if (!(this.currentRange && this.currentRange.modelList)) {
+      return false;
+    } else {
+      return !(this.currentRange.modelList.length > 0);
+    }
+  }
+
+  getDescription(description: any) {
+    if(description && description[this.langCode]) {
+      const descriptionObj = description[this.langCode];
+      return (longDescriptionContries.indexOf(COUNTRY.COUNTRY_CODE) > -1) ? descriptionObj['longDescription'] : descriptionObj['mediumDescription'];
+    } else {
+      return '';
+    }
+  }
+  pageLoadAnalyticsEvent() {
+    // this._adobeAnalyticsService.updatePageNameAndPageID(this.selectedRangeOption.name);
+    const pageNameSuffix = (this.selectedRangeOption.name || '').toLowerCase();
+    this._adobeAnalyticsService.setupModelsPageDataLayer(pageNameSuffix, this.virtualPageLoad);
+    const analyticsMinProductAttributes: AnalyticsMinProductAttributes = {
+      internalCode: this.selectedRangeOption.code,
+      modelName: (this.selectedRangeOption.name ? this.selectedRangeOption.name : ''),
+      modelCode: '',
+      productionYear: analyticsInfo.general.fallbackValue,
+      yearOfRegistration: analyticsInfo.general.fallbackValue,
+      series: (this.currentRange.modelList && this.currentRange.modelList[0] && this.currentRange.modelList[0].value) ?
+        this.currentRange.modelList[0].value.series : ''
+    };
+    const analyticsMinProductInfo: AnalyticsMinProductInfo = {
+      productID: '',
+      productName: '',
+    };
+    this._adobeAnalyticsService.setupProductData(analyticsMinProductAttributes, analyticsMinProductInfo);
+    if (this._adobeAnalyticsService.verifyRoute('/ranges/') || this._adobeAnalyticsService.verifyRoute('/allmodels/')) {
+      this._adobeAnalyticsService.triggerEvent('osm_pageload');
+    }
+  }
+
+  openConfigurator(model) {
+    const modelValue = model.value;
+    const selectedOptions = model.extraDescriptionData.selectedOptions;
+    let targetUrl = `${countryInformation[this.countryCode].configurationURL}${this.rangeCode}`
+    if(modelValue) {
+      this.addOptionsAnalytics(modelValue);
+      targetUrl = `${countryInformation[this.countryCode].configurationURL}${modelValue.modelRange || ''}/${modelValue.modelCode}/${selectedOptions.exterior.name},${selectedOptions.interior.name}`;
+    }
+    window.open(targetUrl, '_blank');
+  }
+
+  autoOpenContactDealerPopUp(){
+    if (this._storageService.isLoggedIn()) {
+      this.selectedSeriesForDealerContact = this.route.snapshot.queryParams['series'];
+      this.selectedModelRangeForDealerContact= this.route.snapshot.queryParams['modelRange'];
+      this.selectedVariantForDealerContact= this.route.snapshot.queryParams['variant'];
+      this.selectedModelCodeForDealerContact= this.route.snapshot.queryParams['modelCode'];
+      this.selectedExteriorForDealerContact= this.route.snapshot.queryParams['exterior'];
+      this.selectedInteriorForDealerContact= this.route.snapshot.queryParams['interior'];
+      this.selectedBrandForDealerContact= this.route.snapshot.queryParams['brand'];
+      this.displayDealerDialog = true;
+    }
+    }
+
+  contactDealer(){
+    if (this._storageService.isLoggedIn()) {
+            this.dialogmsgstatus =false;
+            this.displayDealerDialog = true;
+    }else{
+            this.dialogmsgstatus =false;   
+            const selectedModel = this.currentRange.modelList[
+              this.availableModelDetails.modelIndex
+            ]; 
+      this.router.navigate(['login'], {
+        queryParams: { returnUrl: this.snapshot.url,
+                      series: this.availableModelDetails.data.extraDescriptionData.value.series,
+                      modelRange: this.availableModelDetails.data.extraDescriptionData.value.modelRange,
+                      variant: selectedModel.value.additionalData.description[this.langCode].mediumDescription,
+                      modelCode: this.availableModelDetails.data.extraDescriptionData.value.modelCode,
+                      exterior: this.availableModelDetails.exterior.name,
+                      interior:  this.availableModelDetails.interior.name,
+                      brand: this.availableModelDetails.data.value.brand,
+                      contactDealerClick: true},
+      });
+    }
+    /* to send 'Contact dealer' event action to Google analytics */
+    const selectedModel = this.currentRange.modelList[
+      this.availableModelDetails.modelIndex
+    ]; 
+    const eventData = {
+      event_label: selectedModel.value.additionalData.description[this.langCode].mediumDescription   /*model name */
+   };
+   this._analyticsService.sendEvent('Contact dealer - Stock unavailable - Models Page', eventData);
+}
+closeDealerModal(){
+  this.displayDealerDialog = false;
+}
+
+dealerSelected(dealer) {
+   this.displayDealerDialog = false;
+   this.selectedDealerCode =dealer.dealerCode;
+   const selectedModel = this.currentRange.modelList[
+    this.availableModelDetails.modelIndex
+  ];
+  this.selectedModelRangeForDealer = this.rangeList.filter(range => 
+    (this.availableModelDetails && this.availableModelDetails.data 
+      && this.availableModelDetails.data.extraDescriptionData 
+      && this.availableModelDetails.data.extraDescriptionData.value 
+      && this.availableModelDetails.data.extraDescriptionData.value.modelRange 
+      && range.code === this.availableModelDetails.data.extraDescriptionData.value.modelRange) || range.code ==this.selectedModelRangeForDealerContact );
+
+      const sendDealerData ={
+        "dealerCode":this.selectedDealerCode,
+        "exterior":this.availableModelDetails && this.availableModelDetails.exterior
+                    && this.availableModelDetails.exterior.name || this.selectedExteriorForDealerContact,
+        "interior":this.availableModelDetails &&  this.availableModelDetails.interior
+                    &&  this.availableModelDetails.interior.name || this.selectedInteriorForDealerContact,
+        "variant":selectedModel && selectedModel.value && selectedModel.value.additionalData
+                    && selectedModel.value.additionalData.description[this.langCode]
+                    && selectedModel.value.additionalData.description[this.langCode].mediumDescription || this.selectedVariantForDealerContact,
+        "modelCode":this.availableModelDetails && this.availableModelDetails.data
+                    && this.availableModelDetails.data.extraDescriptionData
+                    && this.availableModelDetails.data.extraDescriptionData.value
+                    && this.availableModelDetails.data.extraDescriptionData.value.modelCode || this.selectedModelCodeForDealerContact,
+        "modelRange":this.selectedModelRangeForDealer && this.selectedModelRangeForDealer[0] && this.selectedModelRangeForDealer[0].name  || this.selectedModelRangeForDealerContact,
+        "modelDetails":{
+           "modelName":selectedModel && selectedModel.value && selectedModel.value.additionalData
+                          && selectedModel.value.additionalData.description[this.langCode]
+                          && selectedModel.value.additionalData.description[this.langCode].mediumDescription || this.selectedVariantForDealerContact,
+           "brand":this.availableModelDetails && this.availableModelDetails.data && this.availableModelDetails.data.value && this.availableModelDetails.data.value.brand || this.selectedBrandForDealerContact,
+           "seriesName":this.availableModelDetails && this.availableModelDetails.data
+                          && this.availableModelDetails.data.extraDescriptionData
+                          && this.availableModelDetails.data.extraDescriptionData.value
+                          && this.availableModelDetails.data.extraDescriptionData.value.series  || this.selectedSeriesForDealerContact,
+            "modelCode":this.availableModelDetails && this.availableModelDetails.data
+                          && this.availableModelDetails.data.extraDescriptionData
+                          && this.availableModelDetails.data.extraDescriptionData.value
+                          && this.availableModelDetails.data.extraDescriptionData.value.modelCode || this.selectedModelCodeForDealerContact,
+            "modelRange":this.selectedModelRangeForDealer && this.selectedModelRangeForDealer[0] && this.selectedModelRangeForDealer[0].name  || this.selectedModelRangeForDealerContact
+        }
+     }
+   this._securedService.post(sendDealerData, 'customer-journey/' + this.countryCode + '/v1/customer-model-notification')
+    .subscribe((data: any) => {
+        this.dealerWillContactPopup =true;
+       },
+       err => {
+       }
+     );
+}
+
+closeMsgPopup(){
+  this.dealerWillContactPopup =false;
+  this.router.navigate(['home']);
+}
+
+closeErrorPopup(){
+  this.dialogmsgstatus = false;
+  this.showTryAgainMsg =false;
+}
+
+addOptionsAnalytics(eachModel) {
+  const eventData = {
+    event_label: eachModel && eachModel.additionalData && this.getDescription(eachModel.additionalData.description)
+  };
+  this._analyticsService.sendEvent(
+    'Add Option button – Models Page',
+    eventData
+  );
+
+}
+
+
+  // constructor() { }
+
+  // ngOnInit() {
+  // }
+
+}
